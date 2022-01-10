@@ -7,6 +7,10 @@ license = "MIT"
 readme = "README.md"
 keywords = ["redshift", "database", "privileges"]
 
+packages = [
+  { include = "redtape" },
+]
+
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
