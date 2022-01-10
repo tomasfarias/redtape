@@ -1,0 +1,71 @@
+[tool.poetry]
+name = "redtape"
+version = "0.1.0"
+description = "A permission management tool for AWS Redshift."
+authors = ["Tomás Farías Santana <tomas@tomasfarias.dev>"]
+license = "MIT"
+readme = "README.md"
+keywords = ["redshift", "database", "privileges"]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Database",
+]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+mashumaro = "2.10.1"
+PyYAML = "^6.0"
+rich = "11"
+psycopg2-binary = "^2.9.3"
+typer = "^0.4.0"
+pre-commit = "^2.16.0"
+
+[tool.poetry.dev-dependencies]
+black = "^21.12b0"
+flake8 = "^4.0.1"
+isort = "^5.10.1"
+mypy = "^0.930"
+pytest = "^6.2.5"
+pre-commit = "^2.16.0"
+
+[tool.poetry.scripts]
+redtape = "redtape.cli:main"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+py_version = 38
+profile = "black"
+
+
+[tool.mypy]
+ignore_missing_imports = true
+strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
