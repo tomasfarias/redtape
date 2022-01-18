@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from enum import Enum, auto
+from functools import update_wrapper
 from typing import Any, Callable, Iterator, Optional, Union
 
 import psycopg2
@@ -15,12 +16,59 @@ import psycopg2
 from redtape.connectors import RedshiftConnector
 from redtape.specification import (
     DatabaseObject,
+    DatabaseObjectType,
     Group,
     Operation,
     Privilege,
     Specification,
     User,
 )
+
+
+class OperationDispatch:
+    """Decorator to dispatch on operation attribute state.
+
+    Opreations should be registered like:
+    >>> od = OperationDispatch()
+    >>> class Manager:
+    ... @od.register(Operation.CREATE)
+    ... def handle_create(self):
+    ... pass
+
+    Attributes:
+        registry (dict): Map of registered operations to handler methods.
+    """
+
+    def __init__(self):
+        self.registry = {}
+
+    def __get__(self, instance, owner) -> Callable:
+        """Return a handler for the operation set in instance.
+
+        Raises:
+            ValueError: If no handler has been registered for that operation.
+        """
+        if instance is None:
+            return self
+
+        op = getattr(instance, "operation")
+        try:
+            method = self.registry[op]
+        except KeyError:
+            raise ValueError(
+                f"{instance.subject.__class__.__name__} does not support {op} operations."
+            )
+
+        return method.__get__(instance, owner)
+
+    def register(self, operation: Operation) -> Callable:
+        """Register a handler for an operation."""
+
+        def decorator(method):
+            self.registry[operation] = method
+            return method
+
+        return decorator
 
 
 class ManagementOperationError(Exception):
@@ -84,11 +132,6 @@ class ManagementOperation:
             self._query = self.build_query()
         return self._query
 
-    @abstractmethod
-    def build_query(self) -> str:
-        """Subclasses should implement how to build a query."""
-        raise NotImplementedError
-
 
 class UserManagementOperation(ManagementOperation):
     """ManagementOperations that affect Users.
@@ -97,6 +140,8 @@ class UserManagementOperation(ManagementOperation):
         group (Group, optional): For ADD_TO_GROUP or DROP_FROM_GROUP
             operations, the group to be added to or dropped from.
     """
+
+    build_query = OperationDispatch()
 
     def __init__(self, *args, group: Optional[Group] = None, **kwargs):
         self.group = group
@@ -120,56 +165,73 @@ class UserManagementOperation(ManagementOperation):
             f"group={self.group})"
         )
 
-    def build_query(self) -> str:
-        """Build a query for all supported User operations."""
-        if self.operation is Operation.CREATE:
-            if self.subject.password is None:
-                raise TypeError(
-                    "Creating a user in Redshift requires a password not {type(self.subject.password)}."
-                )
-
-            return "CREATE USER {name}{password}{is_superuser};".format(
-                name=self.subject.name,
-                is_superuser=" CREATEUSER" if self.subject.is_superuser is True else "",
-                password=f" PASSWORD '{self.subject.password}'",
-            )
-
-        elif self.operation is Operation.DROP:
-            return f"DROP USER {self.subject.name};"
-
-        elif self.operation is Operation.GRANT:
-            if self.privilege is None:
-                raise TypeError(
-                    "{operation} requires a Privilege but {type(privilege)} was provided."
-                )
-
-            return (
-                f"GRANT {self.privilege.action.name} ON "
-                f"{self.privilege.database_object._type.name} "
-                f"{self.privilege.database_object.name} TO {self.subject.name};"
-            )
-
-        elif (
-            self.operation is Operation.ADD_TO_GROUP
-            or self.operation is Operation.DROP_FROM_GROUP
-        ):
-            if self.group is None:
-                raise TypeError(
-                    f"{self.operation} requires a Group but "
-                    f"{type(self.group)} was provided."
-                )
-
-            op = self.operation.canonical
-            return f"ALTER GROUP {self.group.name} {op} USER {self.subject.name};"
-
-        else:
+    @build_query.register(Operation.CREATE)
+    def build_create_query(self) -> str:
+        if self.subject.password is None:
             raise TypeError(
-                f"User does not support operations of type {type(self.operation)}."
+                f"Creating a user in Redshift requires a password not {type(self.subject.password)}."
             )
+
+        return "CREATE USER {name}{password}{is_superuser};".format(
+            name=self.subject.name,
+            is_superuser=" CREATEUSER" if self.subject.is_superuser is True else "",
+            password=f" PASSWORD '{self.subject.password}'",
+        )
+
+    @build_query.register(Operation.DROP)
+    def build_drop_query(self) -> str:
+        return f"DROP USER {self.subject.name};"
+
+    @build_query.register(Operation.GRANT)
+    def build_grant_query(self) -> str:
+        if self.privilege is None:
+            raise TypeError(
+                f"{operation} requires a Privilege but {type(privilege)} was provided."
+            )
+
+        db_obj = self.privilege.database_object
+        support_on_all_query = (
+            DatabaseObjectType.TABLE,
+            DatabaseObjectType.VIEW,
+            DatabaseObjectType.FUNCTION,
+            DatabaseObjectType.PROCEDURE,
+        )
+        _type = (
+            db_obj._type
+            if db_obj._type is not DatabaseObjectType.VIEW
+            else DatabaseObjectType.TABLE
+        )
+
+        if any((db_obj.has_wildcard_part(t) for t in support_on_all_query)):
+            db, schema, _ = db_obj.parts
+            return (
+                f"GRANT {self.privilege.action.name} ON ALL "
+                f"{_type.name + 'S'} IN SCHEMA "
+                f"{db.name}.{schema.name} TO {self.subject.name};"
+            )
+
+        return (
+            f"GRANT {self.privilege.action.name} ON "
+            f"{_type.name} {self.privilege.database_object.name} TO {self.subject.name};"
+        )
+
+    @build_query.register(Operation.DROP_FROM_GROUP)
+    @build_query.register(Operation.ADD_TO_GROUP)
+    def build_group_queries(self) -> str:
+        if self.group is None:
+            raise TypeError(
+                f"{self.operation} requires a Group but "
+                f"{type(self.group)} was provided."
+            )
+
+        op = self.operation.canonical
+        return f"ALTER GROUP {self.group.name} {op} USER {self.subject.name};"
 
 
 class GroupManagementOperation(ManagementOperation):
     """ManagementOperatinos that affect Groups."""
+
+    build_query = OperationDispatch()
 
     def __repr__(self):
         return (
@@ -178,31 +240,46 @@ class GroupManagementOperation(ManagementOperation):
             f"group={self.group})"
         )
 
-    def build_query(self) -> str:
-        """Build a query for all supported Group operations."""
-        if self.operation is Operation.CREATE:
-            return f"CREATE GROUP {self.subject.name};"
+    @build_query.register(Operation.CREATE)
+    def build_create_query(self) -> str:
+        return f"CREATE GROUP {self.subject.name};"
 
-        elif self.operation is Operation.DROP:
-            return f"DROP GROUP {self.subject.name};"
+    @build_query.register(Operation.DROP)
+    def build_drop_query(self) -> str:
+        return f"DROP GROUP {self.subject.name};"
 
-        elif self.operation is Operation.GRANT:
-            if self.privilege is None:
-                raise TypeError(
-                    f"{self.operation} requires a Privilege but "
-                    f"{type(self.privilege)} was provided."
-                )
-
-            return (
-                f"GRANT {self.privilege.action.name} ON "
-                f"{self.privilege.database_object._type.name} "
-                f"{self.privilege.database_object.name} TO GROUP {self.subject.name};"
-            )
-
-        else:
+    @build_query.register(Operation.GRANT)
+    def build_grant_query(self) -> str:
+        if self.privilege is None:
             raise TypeError(
-                f"Group does not support operations of type {type(self.operation)}."
+                f"{operation} requires a Privilege but {type(privilege)} was provided."
             )
+
+        db_obj = self.privilege.database_object
+        support_on_all_query = (
+            DatabaseObjectType.TABLE,
+            DatabaseObjectType.VIEW,
+            DatabaseObjectType.FUNCTION,
+            DatabaseObjectType.PROCEDURE,
+        )
+        _type = (
+            db_obj._type
+            if db_obj._type is not DatabaseObjectType.VIEW
+            else DatabaseObjectType.TABLE
+        )
+
+        if any((db_obj.has_wildcard_part(t) for t in support_on_all_query)):
+            db, schema, _ = db_obj.parts
+            return (
+                f"GRANT {self.privilege.action.name} ON ALL "
+                f"{_type.name + 'S'} IN SCHEMA "
+                f"{db.name}.{schema.name} TO {self.subject.name};"
+            )
+
+        return (
+            f"GRANT {self.privilege.action.name} ON "
+            f"{_type.name} {self.privilege.database_object.name} TO {self.subject.name};"
+        )
 
 
 def no_filter(_: Any) -> bool:
@@ -351,7 +428,7 @@ class DatabaseAdministratorTrainer:
             ]
 
         else:
-            raise TypeError("Operation can only be CREATE or DROP not {operation}")
+            raise TypeError(f"Operation can only be CREATE or DROP not {operation}")
 
         for subject in subjects:
             if isinstance(subject, User):
@@ -489,7 +566,9 @@ class DatabaseAdministratorTrainer:
         operation: Operation,
     ):
         if operation not in (Operation.GRANT, Operation.REVOKE):
-            raise TypeError("Privileges can only be granted or revoked not {operation}")
+            raise TypeError(
+                f"Privileges can only be granted or revoked not {operation}"
+            )
 
         if isinstance(subject, User):
             action_cls = UserManagementOperation
@@ -570,9 +649,8 @@ class DatabaseAdministrator:
             if before_callback is not None:
                 before_callback(query, action)
             try:
-                with connector.connection() as conn:
-                    with conn.cursor() as cursor:
-                        _ = cursor.execute(query)
+                with connector.connect() as conn:
+                    _ = conn.run_query(query)
             except psycopg2.Error as e:
                 success = False
 

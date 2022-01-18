@@ -12,6 +12,11 @@ def spec_file(tmp_path_factory):
                 {
                     "name": "test_user_1",
                     "is_superuser": True,
+                    "member_of": ["my_user_group_1", "my_user_group_2"],
+                    "password": {
+                        "type": "md5",
+                        "value": "md5thisisnotanmd5hash",
+                    },
                     "privileges": {
                         "table": {
                             "select": [

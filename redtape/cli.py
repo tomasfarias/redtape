@@ -2,6 +2,7 @@
 
 import sys
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 import typer
@@ -13,6 +14,7 @@ from rich.table import Table
 from redtape.admin import DatabaseAdministratorTrainer
 from redtape.connectors import RedshiftConnector
 from redtape.specification import (
+    DatabaseObject,
     Group,
     Operation,
     Specification,
@@ -98,6 +100,10 @@ def export(
         None,
         help="A connection string to connect to Redshift.",
     ),
+    config_file: Optional[Path] = typer.Option(
+        None,
+        help="The path to a INI configuration file with Redshift connection information.",
+    ),
     quiet: bool = typer.Option(
         False,
         help="Show no output except for validation and/or run errors.",
@@ -106,16 +112,19 @@ def export(
     """Export a specification from an existing Redshift connection."""
     if connection_string is not None:
         connector = RedshiftConnector.from_dsn(connection_string)
+    elif config_file is not None:
+        connector = RedshiftConnector.from_ini_file(config_file)
     else:
         connector = RedshiftConnector(dbname, host, port, user, password)
 
     db_spec = load_spec(connector, quiet)
     with console_status("Exporting configuration...", quiet):
+
         if json is True:
             print_func: Callable[..., None] = console.print_json
             output: Union[str, bytes, Syntax] = db_spec.to_json()
         else:
-            output = Syntax(str(db_spec.to_yaml()), "yaml", background_color="default")
+            output = Syntax(db_spec.to_yaml(), "yaml", background_color="default")
             print_func = console.print
 
     print_func(output)
@@ -289,9 +298,8 @@ def load_spec(
         raise typer.Exit(code=1)
     except ValueError as e:
         console_print(":cross_mark: Invalid specification file", quiet)
-        raise e
         raise typer.Exit(code=1)
-    except ConnectionError:
+    except ConnectionError as e:
         console_print(":cross_mark: Failed to connect to Redshift Database", quiet)
         raise typer.Exit(code=1)
 
