@@ -1,8 +1,8 @@
-import os
+from __future__ import annotations
+
 from abc import abstractmethod
 from collections import namedtuple
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Iterator, Optional
 
 import attrs
