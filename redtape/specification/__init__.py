@@ -3,6 +3,8 @@
 Redtape models support serialization and deserialization to YAML and JSON.
 Moreoever, models can be read created from any DatabaseConnector.
 """
+from __future__ import annotations
+
 import json
 from enum import Enum
 from functools import singledispatch, wraps
