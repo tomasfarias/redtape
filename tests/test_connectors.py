@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from redtape.connectors import parse_acl
 
 

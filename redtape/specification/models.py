@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 import operator
 from enum import Enum
-from typing import Any, Iterator, Optional, Union
+from typing import Iterator, Optional, Union
 
 import attrs
 
