@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "redtape-py"
-version = "0.2.0"
+version = "0.3.0"
 description = "A permission management tool for AWS Redshift."
 authors = ["Tomás Farías Santana <tomas@tomasfarias.dev>"]
 license = "MIT"
