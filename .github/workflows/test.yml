@@ -1,0 +1,43 @@
+name: Tests
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [3.8, 3.9, 3.10]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Poetry
+        uses: abatilo/actions-poetry@v2.1.4
+        with:
+          poetry-version: 1.1.12
+      - name: Install redtape with Poetry
+        run: poetry install
+#      - name: Style guide enforcement with flake8
+#        run: poetry run flake8 .
+#      - name: Static type checking with mypy
+#        run: poetry run mypy .
+      - name: Code formatting with black
+        run: poetry run black --check .
+      - name: Run tests with pytest
+        run: poetry run pytest -v --cov=./redtape --cov-report=xml:./coverage.xml --cov-report term-missing tests/
+      - name: Upload code coverage
+        uses: codecov/codecov-action@v2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.xml
+          name: redtape
+          flags: unittests
+          env_vars: OS,PYTHON

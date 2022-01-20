@@ -1,0 +1,36 @@
+name: tagged-release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  gh_tagged_release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2.3.4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Poetry
+        uses: abatilo/actions-poetry@v2.1.4
+        with:
+          poetry-version: 1.1.12
+      - name: Install redtape with Poetry
+        run: poetry install
+      - name: Build redtape with Poetry
+        run: poetry build
+      - name: Get latest tag
+        id: previoustag
+        uses: WyriHaximus/github-action-get-previous-tag@v1
+      - name: Release new SemVer tag
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          prerelease: false
+          files: |
+            dist/redtape_py-${{ steps.previoustag.outputs.tag }}.tar.gz
+            dist/redtape_py-${{ steps.previoustag.outputs.tag }}-py2.py3-none-any.whl
+        id: automatic_releases
