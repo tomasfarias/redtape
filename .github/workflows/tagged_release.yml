@@ -9,6 +9,13 @@ jobs:
   gh_tagged_release:
     runs-on: ubuntu-latest
     steps:
+      - name: Wait for Tests to succeed
+        uses: fountainhead/action-wait-for-check@v1.0.0
+        id: wait-for-test
+        with:
+          token: ${{ secrets.PA_TOKEN }}
+          checkName: test
+          ref: ${{ github.sha }}
       - uses: actions/checkout@v2.3.4
       - name: Set up Python 3.10
         uses: actions/setup-python@v2
@@ -23,14 +30,14 @@ jobs:
       - name: Build redtape with Poetry
         run: poetry build
       - name: Get latest tag
-        id: previoustag
+        id: latest
         uses: WyriHaximus/github-action-get-previous-tag@v1
       - name: Release new SemVer tag
         uses: marvinpinto/action-automatic-releases@latest
         with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          repo_token: "${{ secrets.PA_TOKEN }}"
           prerelease: false
           files: |
-            dist/redtape_py-${{ steps.previoustag.outputs.tag }}.tar.gz
-            dist/redtape_py-${{ steps.previoustag.outputs.tag }}-py2.py3-none-any.whl
+            dist/redtape_py-${{ steps.latest.outputs.tag }}.tar.gz
+            dist/redtape_py-${{ steps.latest.outputs.tag }}-py2.py3-none-any.whl
         id: automatic_releases

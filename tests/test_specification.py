@@ -1,3 +1,4 @@
+"""Unit tests for the specification module."""
 from __future__ import annotations
 
 import pytest

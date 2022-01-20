@@ -1,7 +1,9 @@
-name: Tests
+name: Test
 on:
   push:
     branches: [ master ]
+    tags:
+      - "v*"
   pull_request:
     branches:
     - master

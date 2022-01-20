@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 import operator
 from enum import Enum
-from typing import Iterator, Optional, Union
+from typing import Iterator, List, Optional, Set, Union
 
 import attrs
 
@@ -386,7 +386,7 @@ class User:
 
     name: str
     is_superuser: bool
-    member_of: Optional[set[str]] = None
+    member_of: Optional[Set[str]] = None
     password: Optional[Password] = None
     privileges: Optional[Privileges] = None
     owns: Optional[Ownerships] = None
@@ -454,8 +454,8 @@ class User:
 
 @attrs.define(slots=True)
 class Specification:
-    users: Optional[list[User]] = None
-    groups: Optional[list[Group]] = None
+    users: Optional[List[User]] = None
+    groups: Optional[List[Group]] = None
 
     def __attrs_post_init__(self):
         if self.users is None:

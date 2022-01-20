@@ -63,7 +63,7 @@ def serializer(value, attr, inst):
 
 
 @serializer.register
-def _(value: Privileges, attr, inst) -> dict[str, Any]:
+def _(value: Privileges, attr, inst) -> "dict[str, Any]":
     """Serialize privileges by nesting them."""
     nested_privileges: dict[str, Any] = {}
 
@@ -82,7 +82,7 @@ def _(value: Privileges, attr, inst) -> dict[str, Any]:
 
 
 @serializer.register
-def _(value: Ownerships, attr, inst) -> dict[str, Any]:
+def _(value: Ownerships, attr, inst) -> "dict[str, Any]":
     """Serialize Ownerships by nesting them."""
 
     nested_ownerships: dict[str, Any] = {}
@@ -97,7 +97,7 @@ def _(value: Ownerships, attr, inst) -> dict[str, Any]:
 
 
 @serializer.register
-def _(value: Password, attr, inst) -> dict[str, str]:
+def _(value: Password, attr, inst) -> "dict[str, str]":
     """Serialize Password by renaming attributes."""
 
     d = {
