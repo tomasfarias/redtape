@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 import attrs
+import environ
 import psycopg2
+from psycopg2.extensions import parse_dsn
 
 REDSHIFT_TABLES_QUERY = """
 SELECT DISTINCT
@@ -190,8 +192,8 @@ class Schema:
     schema_owner: int
     schema_type: str
     schema_acl: Optional[str]
-    source_database: str
-    schema_option: str
+    source_database: Optional[str]
+    schema_option: Optional[str]
 
     def iter_acl(self) -> Iterator[tuple[str, str, str]]:
         """Iterate over privileges granted specified in ACL."""
@@ -233,7 +235,7 @@ class Table:
     table_owner: str
     table_type: str
     table_acl: Optional[str]
-    remarks: str
+    remarks: Optional[str]
 
     def iter_acl(self) -> Iterator[tuple[str, str, str]]:
         """Iterate over privileges granted specified in ACL."""
@@ -362,6 +364,12 @@ class DatabaseConnector:
         raise NotImplementedError
 
 
+ini_file = environ.secrets.INISecrets.from_path_in_env(
+    "REDTAPE_CONFIG", ".redtape.ini", "redtape.redshift"
+)
+
+
+@environ.config(prefix="REDTAPE_REDSHIFT")
 class RedshiftConnector(DatabaseConnector):
     """Concrete implementation of a DatabaseConnector for Redshift.
 
@@ -373,24 +381,23 @@ class RedshiftConnector(DatabaseConnector):
         password (str): The user name's password.
     """
 
-    def __init__(
-        self,
-        dbname: Optional[str] = None,
-        host: Optional[str] = None,
-        port: Optional[str] = None,
-        user: Optional[str] = None,
-        password: Optional[str] = None,
-    ):
-        self.dbname = dbname
-        self.host = host
-        self.port = port
-        self.user = user
-        self.password = password
-        self.load_missing_from_env()
+    dbname = ini_file.secret(None, help="Redshift cluster database.", name="dbname")
+    host = ini_file.secret(None, help="Redshift cluster host.", name="host")
+    port = ini_file.secret(
+        5439, help="Redshift cluster port.", converter=int, name="port"
+    )
+    user = ini_file.secret(None, help="Redshift cluster username.", name="user")
+    password = ini_file.secret(None, help="Redshift cluster password.", name="password")
+    db_url = ini_file.secret(None, help="Redshift cluster URL.")
+
+    def __attrs_post_init__(self):
+        if self.db_url is not None:
+            self.parse_db_url()
+
         super().__init__()
 
     def __repr__(self):
-        return "RedshiftConnector(dbname={dbname}, host={host}, port={port}, user={user})".format(
+        return "RedshiftConnector(db_url='{user}@{host}:{port}/{dbname}')".format(
             dbname=self.dbname,
             host=self.host,
             port=self.port,
@@ -405,34 +412,22 @@ class RedshiftConnector(DatabaseConnector):
             user=self.user,
         )
 
-    @classmethod
-    def from_ini_file(cls, path: Path, key: str = "redtape"):
-        import configparser
-
-        config = configparser.ConfigParser()
-        config.read(path)
-
-        if dsn := config[key].get("dsn", None) is not None:
-            return cls.from_dsn(dsn)
-        return cls(**config[key])
-
-    @classmethod
-    def from_dsn(cls, dsn):
-        from psycopg2.extensions import parse_dsn
-
-        parsed = parse_dsn(dsn)
-        return cls(**parsed)
-
-    def load_missing_from_env(self):
-        for attr in ("dbname", "host", "user", "port", "password"):
-            if getattr(self, attr, None) is None:
-                setattr(self, attr, os.getenv(f"REDTAPE_REDSHIFT_{attr.upper()}", None))
+    def parse_db_url(self):
+        parsed = parse_dsn(self.db_url)
+        self.host = parsed.get("host", None)
+        self.dbname = parsed.get("dbname", None)
+        self.password = parsed.get("password", None)
+        self.user = parsed.get("user", None)
+        self.port = parsed.get("port", self.port)
 
     def run_query(self, query: str):
         """Run a query using this RedshiftConnector's connection."""
         with self.cursor() as cursor:
             cursor.execute(query)
-            result = cursor.fetchone()
+            if cursor.rowcount == -1:
+                result = None
+            else:
+                result = cursor.fetchone()
         return result
 
     def run_query_and_iter_rows(self, query: str) -> Iterator:

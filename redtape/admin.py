@@ -143,8 +143,15 @@ class UserManagementOperation(ManagementOperation):
 
     build_query = OperationDispatch()
 
-    def __init__(self, *args, group: Optional[Group] = None, **kwargs):
+    def __init__(
+        self,
+        *args,
+        group: Optional[Group] = None,
+        database_object: Optional[DatabaseObject] = None,
+        **kwargs,
+    ):
         self.group = group
+        self.database_object = database_object
         super().__init__(*args, **kwargs)
 
     def __str__(self):
@@ -226,6 +233,17 @@ class UserManagementOperation(ManagementOperation):
 
         op = self.operation.canonical
         return f"ALTER GROUP {self.group.name} {op} USER {self.subject.name};"
+
+    @build_query.register(Operation.ALTER_OWNER)
+    def build_group_queries(self) -> str:
+        if self.database_object is None:
+            raise TypeError(
+                f"{self.operation} requires a DatabaseObject but "
+                f"{type(self.database_object)} was provided."
+            )
+
+        op = self.operation.canonical
+        return f"ALTER {self.database_object._type} {self.database_object.name} OWNER TO {self.subject.name};"
 
 
 class GroupManagementOperation(ManagementOperation):
@@ -341,6 +359,7 @@ class DatabaseAdministratorTrainer:
 
     @property
     def desired_groups(self):
+        """Returned filtered groups from desired specification."""
         if self._desired_groups is None:
             self._desired_groups = [
                 g for g in filter(self.filter_groups, self.desired.groups)
@@ -349,6 +368,7 @@ class DatabaseAdministratorTrainer:
 
     @property
     def current_groups(self):
+        """Returned filtered groups from current specification."""
         if self._current_groups is None:
             self._current_groups = [
                 g for g in filter(self.filter_groups, self.current.groups)
@@ -357,6 +377,7 @@ class DatabaseAdministratorTrainer:
 
     @property
     def desired_users(self):
+        """Returned filtered users from desired specification."""
         if self._desired_users is None:
             self._desired_users = [
                 u for u in filter(self.filter_users, self.desired.users)
@@ -365,6 +386,7 @@ class DatabaseAdministratorTrainer:
 
     @property
     def current_users(self):
+        """Returned filtered users from current specification."""
         if self._current_users is None:
             self._current_users = [
                 u for u in filter(self.filter_users, self.current.users)
@@ -377,6 +399,9 @@ class DatabaseAdministratorTrainer:
 
         if self.filter_operations(Operation.ADD_TO_GROUP) is True:
             self.prepare_add_to_group()
+
+        if self.filter_operations(Operation.ALTER_OWNER) is True:
+            self.prepare_alter_ownership()
 
         if self.filter_operations(Operation.GRANT) is True:
             self.prepare_grant_group_privileges()
@@ -393,6 +418,20 @@ class DatabaseAdministratorTrainer:
             self.prepare_drop_subjects()
 
         return DatabaseAdministrator(self._management_ops)
+
+    def prepare_alter_ownership(self):
+        for user in self.desired_users:
+            if user.owns is None or len(user.owns) == 0:
+                continue
+
+            for db_obj in user.owns:
+                self._management_ops.append(
+                    UserManagementOperation(
+                        subject=user,
+                        operation=Operation.ALTER_OWNER,
+                        database_object=db_obj,
+                    )
+                )
 
     def prepare_create_subjects(self):
         self.prepare_subjects(
@@ -441,31 +480,55 @@ class DatabaseAdministratorTrainer:
                 )
 
     def prepare_add_to_group(self):
-        group_map = {
-            group.name: group for group in self.current.groups + self.desired.groups
-        }
-        for user in self.desired_users:
-            if user.member_of is None or len(user.member_of) == 0:
-                continue
+        """Prepares ADD_TO_GROUP operations for all users.
 
-            for group_name in user.member_of:
-                group = group_map[group_name]
+        If a user exists in the current specification, then we should add it to groups
+        that are in the desired spec, but they are not part of. If it doesn't exist,
+        then we need to add them to all groups.
+        """
 
-                self._management_ops.append(
-                    UserManagementOperation(
-                        subject=user, operation=Operation.ADD_TO_GROUP, group=group
-                    )
-                )
+        self.prepare_group_membership(
+            self.desired_users,
+            self.current.users,
+            self.current.groups + self.desired.groups,
+            Operation.ADD_TO_GROUP,
+        )
 
     def prepare_drop_from_group(self):
-        group_map = {
-            group.name: group for group in self.current.groups + self.desired.groups
-        }
-        for user in self.current_users:
+        """Prepares DROP_FROM_GROUP operations for all users.
+
+        If a user exists in the desired specification, then we should remove it from groups
+        that are not in the desired spec. If it doesn't exist, then we need to drop the user
+        from all groups.
+        """
+
+        self.prepare_group_membership(
+            self.current_users,
+            self.desired.users,
+            self.current.groups + self.desired.groups,
+            Operation.DROP_FROM_GROUP,
+        )
+
+    def prepare_group_membership(
+        self,
+        users: Iterable[User],
+        users_to_compare: Iterable[User],
+        groups: Iterable[Group],
+        operation: Operation,
+    ):
+        """Prepare group membership operations for all given users."""
+        users_map = {user.name: user for user in users_to_compare}
+        group_map = {group.name: group for group in groups}
+        for user in users:
             if user.member_of is None or len(user.member_of) == 0:
                 continue
 
-            for group_name in user.member_of:
+            if compare_user := users_map.get(user.name, None) is not None:
+                to_operate = user.member_of - compare_user.member_of
+            else:
+                to_operate = user.member_of
+
+            for group_name in to_operate:
                 group = group_map[group_name]
 
                 self._management_ops.append(
@@ -587,8 +650,13 @@ class DatabaseAdministratorTrainer:
 class OnError(Enum):
     """Behavior when encountering an error while running Admin actions."""
 
-    CONTINUE = auto()
-    ABORT = auto()
+    CONTINUE = "CONTINUE"
+    ABORT = "ABORT"
+
+
+def _do_nothing(*args, **kwargs):
+    """Does nothing."""
+    return
 
 
 class DatabaseAdministrator:
@@ -604,18 +672,18 @@ class DatabaseAdministrator:
 
     def queries(self) -> Iterator[tuple[str, ManagementOperation]]:
         """A generator over queries and their actions."""
-        for ops in self.ops:
+        for op in self.ops:
             yield op.query, op
 
     def manage(
         self,
         connector: RedshiftConnector,
-        before_callback: Optional[Callable[[str, ManagementOperation], Any]] = None,
-        progress_callback: Optional[Callable[[str, ManagementOperation], Any]] = None,
-        success_callback: Optional[Callable[[str, ManagementOperation], Any]] = None,
-        on_error_callback: Optional[
-            Callable[[str, ManagementOperation, psycopg2.Error], Any]
-        ] = None,
+        before_callback: Callable[[str, ManagementOperation], Any] = _do_nothing,
+        progress_callback: Callable[[str, ManagementOperation, Any], Any] = _do_nothing,
+        success_callback: Callable[[str, ManagementOperation, Any], Any] = _do_nothing,
+        on_error_callback: Callable[
+            [str, ManagementOperation, psycopg2.Error, Any], Any
+        ] = _do_nothing,
         on_error: OnError = OnError.CONTINUE,
     ) -> tuple[bool, Optional[list[ManagementOperationError]]]:
         """Run the given actions and execute callbacks.
@@ -623,41 +691,44 @@ class DatabaseAdministrator:
         Args:
             connector (RedshiftConnector): A database connector. Currently
                 only RedshiftConnector is supported.
-            before_callback (Callable, optional): A function called before
+            before_callback (Callable): A function called before
                 executing an action. It will receive two positional arguments:
                 the query and the action that originated it.
-            progress_callback (Callable, optional): A function called after
+            progress_callback (Callable): A function called after
                 an action has ran regardless of success status. It will receive
-                two positional arguments: the query and the action that
-                originated it.
-            success_callback (Callable, optional): A function called after
+                three positional arguments: the query, the action that
+                originated it, and whatever before_callback returns.
+            success_callback (Callable): A function called after
                 an action has ran if the execution succeeded. It will receive
                 two positional arguments: the query and the action that
                 originated it.
-            on_error_callback (Callable, optional): A function called after
+            on_error_callback (Callable): A function called after
                 an action has ran if the execution failed. It will receive
                 three positional arguments: the query, the action that
                 originated it and the exception raised.
-            on_error (OnError, optional): Control behavior if an action fails:
+            on_error (OnError): Control behavior if an action fails:
                 OnError.ABORT to immediatly finish, OnError.Continue to
                 continue with remaining actions.
         """
         errors = []
         success = True
 
-        for query, action in self.queries():
-            if before_callback is not None:
-                before_callback(query, action)
+        for idx, tup in enumerate(self.queries()):
+
+            query, action = tup
+            before_result = before_callback(query, action)
+
             try:
                 with connector.connect() as conn:
                     _ = conn.run_query(query)
+
             except psycopg2.Error as e:
                 success = False
 
-                if on_error_callback is not None:
-                    on_error_callback(query, action, e)
+                on_error_callback(query, action, e, before_result)
 
-                if on_error is OnError.ABORT:
+                print(on_error == OnError.ABORT)
+                if on_error == OnError.ABORT:
                     raise ManagementOperationError(action) from e
                 else:
                     exc = ManagementOperationError(action)
@@ -665,11 +736,9 @@ class DatabaseAdministrator:
                     errors.append(exc)
 
             else:
-                if success_callback is not None:
-                    success_callback(query, action)
+                success_callback(query, action, before_result)
 
             finally:
-                if progress_callback is not None:
-                    progress_callback(query, action)
+                progress_callback(query, action, idx)
 
         return success, errors

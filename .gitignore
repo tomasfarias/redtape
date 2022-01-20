@@ -4,3 +4,4 @@ __pycache__/
 __mypy_cache__/
 .mypy_cache__/
 .env
+.redtape.ini

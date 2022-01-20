@@ -217,6 +217,7 @@ class Operation(Enum):
     GRANT = "GRANT"
     REVOKE = "REVOKE"
     ADD_TO_GROUP = "ADD_TO_GROUP"
+    ALTER_OWNER = "ALTER_OWNER"
 
     @property
     def canonical(self) -> str:
@@ -224,6 +225,8 @@ class Operation(Enum):
             return "DROP"
         elif self is Operation.ADD_TO_GROUP:
             return "ADD"
+        elif self is Operation.ALTER_OWNER:
+            return "ALTER"
         else:
             return self.value
 
@@ -454,6 +457,12 @@ class Specification:
     users: Optional[list[User]] = None
     groups: Optional[list[Group]] = None
 
+    def __attrs_post_init__(self):
+        if self.users is None:
+            self.users = []
+        if self.groups is None:
+            self.groups = []
+
     @classmethod
     def from_redshift_connector(cls, connector: RedshiftConnector) -> Specification:
         """Initialize a Specification from a RedshiftConnector."""
@@ -477,7 +486,7 @@ class Specification:
             if isinstance(entity, Table):
                 db_obj = DatabaseObject.from_parts(
                     *get_table_parts(entity),
-                    type=DatabaseObjectType.TABLE,
+                    type=DatabaseObjectType[entity.table_type],
                 )
             elif isinstance(entity, Database):
                 db_obj = DatabaseObject.from_parts(
@@ -534,7 +543,7 @@ class Specification:
         connector: RedshiftConnector,
     ) -> tuple[list[User], list[Group]]:
         groups: list[Group] = []
-        group_members: dict[int, list[str]] = {}
+        group_members: dict[int, set[str]] = {}
 
         for group_row in connector.iter_groups():
             group = Group(
@@ -544,8 +553,8 @@ class Specification:
             groups.append(group)
 
             for user_id in group_row.iter_group_members():
-                user_groups = group_members.setdefault(user_id, [])
-                user_groups.append(group.name)
+                user_groups = group_members.setdefault(user_id, set())
+                user_groups.add(group.name)
 
         users: list[User] = []
 
@@ -600,10 +609,14 @@ class Specification:
                 Second value contains a list of ValidationFailures or is None
                 if validation was successful.
         """
-        success, failures = self.check_users_belong_to_existing_groups()
+        _, failures = self.check_users_belong_to_existing_groups()
+
+        if failures is None:
+            failures = []
 
         for user in self.users:
-            user_success, user_failures = user.validate()
+
+            _, user_failures = user.validate()
             if user_failures is not None:
                 try:
                     failures.extend(user_failures)
@@ -611,15 +624,17 @@ class Specification:
                     failures = user_failures
 
         for group in self.groups:
-            group_success, group_failures = group.validate()
+
+            _, group_failures = group.validate()
             if group_failures is not None:
                 try:
                     failures.extend(group_failures)
                 except AttributeError:
                     failures = group_failures
 
-        total_success = success and user_success and group_success
-        return total_success, failures
+        if len(failures) == 0:
+            return True, None
+        return False, failures
 
     def check_users_belong_to_existing_groups(
         self,

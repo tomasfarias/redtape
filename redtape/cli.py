@@ -1,5 +1,5 @@
 """Redtape's CLI."""
-
+import os
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -7,11 +7,13 @@ from typing import Any, Callable, Optional, Union
 
 import typer
 from rich.console import Console
+from rich.console import Group as ProgressGroup
+from rich.live import Live
 from rich.progress import Progress, track
 from rich.syntax import Syntax
 from rich.table import Table
 
-from redtape.admin import DatabaseAdministratorTrainer
+from redtape.admin import DatabaseAdministratorTrainer, OnError
 from redtape.connectors import RedshiftConnector
 from redtape.specification import (
     DatabaseObject,
@@ -63,7 +65,7 @@ def validate(
 ):
     """Validate a local specification and report any errors."""
     spec = load_spec(spec_file, quiet)
-    console_print(":white_check_mark: Specification loaded!", quiet)
+    console_print("Specification loaded!", quiet)
     success, _ = validate_spec(spec, quiet, json)
 
     if success is False:
@@ -76,33 +78,10 @@ def export(
         False,
         help="Export configuration as JSON instead of YAML.",
     ),
-    dbname: Optional[str] = typer.Option(
+    config: Optional[Path] = typer.Option(
         None,
-        help="A Redshift database name to connect to.",
-    ),
-    host: Optional[str] = typer.Option(
-        None,
-        help="The host where a Redshift cluster is located.",
-    ),
-    port: Optional[str] = typer.Option(
-        None,
-        help="The port where a Redshift cluster is located.",
-    ),
-    user: Optional[str] = typer.Option(
-        None,
-        help="A user to connect to Redshift. The user should have user-management permissions.",
-    ),
-    password: Optional[str] = typer.Option(
-        None,
-        help="The passaword of the given Redshift username.",
-    ),
-    connection_string: Optional[str] = typer.Option(
-        None,
-        help="A connection string to connect to Redshift.",
-    ),
-    config_file: Optional[Path] = typer.Option(
-        None,
-        help="The path to a INI configuration file with Redshift connection information.",
+        help="Path to a Redtape configuration file for database connections. The REDSHIFT_CONFIG environment variable may be set instead.",
+        case_sensitive=False,
     ),
     quiet: bool = typer.Option(
         False,
@@ -110,12 +89,12 @@ def export(
     ),
 ):
     """Export a specification from an existing Redshift connection."""
-    if connection_string is not None:
-        connector = RedshiftConnector.from_dsn(connection_string)
-    elif config_file is not None:
-        connector = RedshiftConnector.from_ini_file(config_file)
+    if config is None:
+        environ = os.environ
     else:
-        connector = RedshiftConnector(dbname, host, port, user, password)
+        environ = {"REDSHIFT_CONFIG": config}
+
+    connector = RedshiftConnector.from_environ(environ=environ)
 
     db_spec = load_spec(connector, quiet)
     with console_status("Exporting configuration...", quiet):
@@ -156,29 +135,10 @@ def run(
         help="Apply only provided operations.",
         case_sensitive=False,
     ),
-    dbname: Optional[str] = typer.Option(
+    config: Optional[Path] = typer.Option(
         None,
-        help="A Redshift database name to connect to.",
-    ),
-    host: Optional[str] = typer.Option(
-        None,
-        help="The host where a Redshift cluster is located.",
-    ),
-    port: Optional[str] = typer.Option(
-        None,
-        help="The port where a Redshift cluster is located.",
-    ),
-    database_user: Optional[str] = typer.Option(
-        None,
-        help="A user to connect to Redshift. The user should have user-management permissions.",
-    ),
-    password: Optional[str] = typer.Option(
-        None,
-        help="The passaword of the given Redshift username.",
-    ),
-    connection_string: Optional[str] = typer.Option(
-        None,
-        help="A connection string to connect to Redshift.",
+        help="Path to a Redtape configuration file for database connections. The REDSHIFT_CONFIG environment variable may be set instead.",
+        case_sensitive=False,
     ),
     quiet: bool = typer.Option(
         False,
@@ -187,7 +147,7 @@ def run(
 ):
     """Run the queries necessary to apply a specification file."""
     desired_spec = load_spec(spec_file, quiet)
-    console_print(":white_check_mark: Desired specification loaded!", quiet)
+    console_print("Desired specification loaded!", quiet)
 
     if not skip_validate:
         success, _ = validate_spec(desired_spec, quiet, False)
@@ -195,13 +155,15 @@ def run(
         if success is False:
             raise typer.Exit(code=1)
 
-    if connection_string is not None:
-        connector = RedshiftConnector.from_dsn(connection_string)
+    if config is None:
+        environ = os.environ
     else:
-        connector = RedshiftConnector(dbname, host, port, database_user, password)
+        environ = {"REDSHIFT_CONFIG": config}
+
+    connector = RedshiftConnector.from_environ(environ=environ)
 
     db_spec = load_spec(connector, quiet)
-    console_print(":white_check_mark: Database specification loaded!", quiet)
+    console_print("Database specification loaded!", quiet)
 
     builder = DatabaseAdministratorTrainer(
         desired_spec=desired_spec, current_spec=db_spec
@@ -224,42 +186,77 @@ def run(
     if operation is not None and len(operation) > 0:
         builder.filter_operations = operation.__contains__
 
-    with console_status(":wrench: Preparing changes...", quiet):
+    with console_status("Preparing changes...", quiet):
         admin = builder.train()
 
     if dry is True:
-        console_print(":cactus: This is a dry-run! No queries will be run!", quiet)
+        console_print("[bold yellow]This is a dry-run! No queries will be run!", quiet)
         for op in admin.ops:
             query = Syntax(op.query, "sql", background_color="default")
             console_print(query, False)
 
         raise typer.Exit()
 
-    with Progress(console=console) as progress:
-        task = progress.add_task(
-            ":factory: Running admin queries", total=len(admin.ops)
+    total_queries = len([q for q in admin.queries()])
+
+    if total_queries == 0:
+        console_print("[bold red]There is nothing to do!", quiet)
+        raise typer.Exit(code=1)
+
+    main_progress = Progress(console=console)
+    query_progress = Progress(console=console)
+
+    progress_group = ProgressGroup(
+        query_progress,
+        main_progress,
+    )
+
+    main_task_id = main_progress.add_task("", total=total_queries)
+
+    def before_callback(query, action):
+        descr = f"Running query {idx+1} out of {total_queries}"
+        main_progress.update(main_task_id, description=descr, advance=1)
+
+        task = query_progress.add_task(f"Running: {query}", total=1)
+        return task
+
+    def success_callback(query, action, query_task):
+        query_progress.update(
+            query_task, description=f"[bold green]Success: {query}", advance=1
         )
+        query_progress.stop_task(query_task)
 
-        def before_callback(query, action):
-            progress.console.print(f":wrench: Running: {query}")
+    def on_error_callback(query, action, exc, query_task):
+        query_progress.update(
+            query_task, description=f"[bold red]Failed: {query}", advance=1
+        )
+        query_progress.stop_task(query_task)
 
-        def progress_callback(query, action):
-            progress.advance(task)
-
-        def success_callback(query, action):
-            progress.console.print(":white_check_mark: Success!")
-
-        def on_error_callback(query, action, exc):
-            progress.console.print(f":cross_mark: Query failed: {exc.pgerror}")
-
+    with Live(progress_group):
         success, errors = admin.manage(
             connector,
             before_callback=before_callback,
-            progress_callback=progress_callback,
             success_callback=success_callback,
             on_error_callback=on_error_callback,
         )
-
+        if success is True:
+            main_progress.update(
+                main_task_id,
+                description=f"[bold green]Success: {total_queries} queries ran, all finished!",
+            )
+        elif len(errors) == len(total_queries):
+            main_progress.update(
+                main_task_id,
+                description=f"[bold red]Failure: all queries failed to run.",
+            )
+        else:
+            main_progress.update(
+                main_task_id,
+                description=(
+                    f"[bold yellow]Partial failure: {len(errors)} "
+                    "out of {total_queries} queries failed."
+                ),
+            )
     console_print(":ribbon: All done! :ribbon:", quiet)
 
 
@@ -275,16 +272,16 @@ def load_spec(
         quiet (bool): Omit logging when quiet is True.
     """
     if spec_source is None:
-        message = ":input_latin_letters: Loading configuration from STDIN"
+        message = "Loading configuration from STDIN"
         spec_source = sys.stdin.read()
         loader: Callable[[Any], Specification] = Specification.from_yaml
 
     elif isinstance(spec_source, str):
-        message = f":floppy_disk: Loading configuration from {spec_source}"
+        message = f"Loading configuration from {spec_source}"
         loader = Specification.from_yaml_file
 
     elif isinstance(spec_source, RedshiftConnector):
-        message = f":card_index: Loading configuration from {spec_source}"
+        message = f"Loading configuration from {spec_source}"
         loader = Specification.from_redshift_connector
 
     try:
@@ -293,14 +290,14 @@ def load_spec(
 
     except FileNotFoundError:
         console_print(
-            f":cross_mark: Specification file does not exist {spec_source}", quiet
+            f"[bold red]Specification file does not exist {spec_source}", quiet
         )
         raise typer.Exit(code=1)
     except ValueError as e:
-        console_print(":cross_mark: Invalid specification file", quiet)
+        console_print("[bold red]Invalid specification file", quiet)
         raise typer.Exit(code=1)
     except ConnectionError as e:
-        console_print(":cross_mark: Failed to connect to Redshift Database", quiet)
+        console_print("[bold red]Failed to connect to Redshift Database", quiet)
         raise typer.Exit(code=1)
 
     return spec
@@ -309,14 +306,14 @@ def load_spec(
 def validate_spec(
     spec: Specification, quiet: bool, json: bool
 ) -> tuple[bool, Optional[list[ValidationFailure]]]:
-    with console_status(":pencil: Validating configuration...", quiet):
+    with console_status("Validating configuration...", quiet):
         success, failures = spec.validate()
 
     if success is True and failures is None:
-        console_print(":white_check_mark: Validation successful!", quiet)
+        console_print("Validation successful!", quiet)
         return True, None
 
-    console_print(f":cross_mark: Validation encountered {len(failures)} errors!", quiet)
+    console_print(f"Validation encountered {len(failures)} errors!", quiet)
 
     if json is True:
         results = {

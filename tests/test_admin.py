@@ -1,6 +1,11 @@
 import pytest
 
-from redtape.admin import GroupManagementOperation, UserManagementOperation
+from redtape.admin import (
+    GroupManagementOperation,
+    ManagementOperation,
+    OperationDispatch,
+    UserManagementOperation,
+)
 from redtape.specification import (
     Action,
     DatabaseObject,
@@ -248,3 +253,45 @@ def test_group_management_operation_invalid(group):
 
     with pytest.raises(ValueError):
         invalid_2.build_query()
+
+
+def test_operation_dispatch():
+    class FakeManagementOperation(ManagementOperation):
+        dispatch = OperationDispatch()
+
+        def __init__(self, operation):
+            self.operation = operation
+
+        @dispatch.register(Operation.CREATE)
+        def handle_create(self) -> str:
+            return "CREATE"
+
+        @dispatch.register(Operation.DROP)
+        def handle_create(self) -> str:
+            return "DROP"
+
+        @dispatch.register(Operation.ADD_TO_GROUP)
+        def handle_create(self) -> str:
+            return "ADD_TO_GROUP"
+
+        @dispatch.register(Operation.DROP_FROM_GROUP)
+        def handle_create(self) -> str:
+            return "DROP_FROM_GROUP"
+
+        @dispatch.register(Operation.GRANT)
+        def handle_create(self) -> str:
+            return "GRANT"
+
+        @dispatch.register(Operation.ALTER_OWNER)
+        def handle_create(self) -> str:
+            return "ALTER_OWNER"
+
+    assert "CREATE" == FakeManagementOperation(Operation.CREATE).dispatch()
+    assert "DROP" == FakeManagementOperation(Operation.DROP).dispatch()
+    assert "ADD_TO_GROUP" == FakeManagementOperation(Operation.ADD_TO_GROUP).dispatch()
+    assert (
+        "DROP_FROM_GROUP"
+        == FakeManagementOperation(Operation.DROP_FROM_GROUP).dispatch()
+    )
+    assert "GRANT" == FakeManagementOperation(Operation.GRANT).dispatch()
+    assert "ALTER_OWNER" == FakeManagementOperation(Operation.ALTER_OWNER).dispatch()

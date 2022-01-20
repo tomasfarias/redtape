@@ -104,6 +104,23 @@ optional = false
 python-versions = "*"
 
 [[package]]
+name = "environ-config"
+version = "21.2.0"
+description = "Boilerplate-free configuration with env variables."
+category = "main"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+attrs = ">=17.4.0"
+
+[package.extras]
+aws = ["boto3"]
+dev = ["boto3", "pytest", "coverage", "moto", "sphinx", "furo", "pre-commit"]
+docs = ["sphinx", "furo"]
+tests = ["pytest", "coverage", "moto"]
+
+[[package]]
 name = "filelock"
 version = "3.4.2"
 description = "A platform independent file lock."
@@ -427,7 +444,7 @@ testing = ["coverage (>=4)", "coverage-enable-subprocess (>=1)", "flaky (>=3)", 
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.8"
-content-hash = "84ed35f4e6173d5bb3ec981cef3649a893f7518e2367bf951c6ebace418ce9c5"
+content-hash = "d268a8f772bb8b8ee70a90c34ca4e898dc7634029a6ecfc8e957ffc87a4e313f"
 
 [metadata.files]
 atomicwrites = [
@@ -465,6 +482,10 @@ commonmark = [
 distlib = [
     {file = "distlib-0.3.4-py2.py3-none-any.whl", hash = "sha256:6564fe0a8f51e734df6333d08b8b94d4ea8ee6b99b5ed50613f731fd4089f34b"},
     {file = "distlib-0.3.4.zip", hash = "sha256:e4b58818180336dc9c529bfb9a0b58728ffc09ad92027a3f30b7cd91e3458579"},
+]
+environ-config = [
+    {file = "environ-config-21.2.0.tar.gz", hash = "sha256:24bebf69d814a18242483c83a2856f20db1b623eab2d34fb712d3d02f5cd22c8"},
+    {file = "environ_config-21.2.0-py2.py3-none-any.whl", hash = "sha256:638057e2fb73984d62192f9c13510eb5df1d291f95b8923e9dc588453d709dd3"},
 ]
 filelock = [
     {file = "filelock-3.4.2-py3-none-any.whl", hash = "sha256:cf0fc6a2f8d26bd900f19bf33915ca70ba4dd8c56903eeb14e1e7a2fd7590146"},
