@@ -1,6 +1,6 @@
 # Redtape
 
-:ribbon: A permission management tool for AWS Redshift, with plans to extend it to other database systems. Inspired by [permifrost](https://gitlab.com/gitlab-data/permifrost/), and [pgbedrock](https://github.com/Squarespace/pgbedrock).
+A permission management tool for AWS Redshift, with plans to extend it to other database systems. Inspired by [permifrost](https://gitlab.com/gitlab-data/permifrost/), and [pgbedrock](https://github.com/Squarespace/pgbedrock).
 
 ## Installing
 
@@ -195,7 +195,7 @@ users:
 `redtape` should be considered in Alpha status: things may break, and test coverage is low. The following tasks are planned for a 1.0.0 release:
 * Increase and track test coverage.
 * Documentation.
-* Support for wildcard (`*`) in specifcation file.
+* Support for wildcard (`*`) in specification file.
 * Support for ownership.
 * Support for `ASSUMEROLE`.
 * Support for `EXTERNAL` objects.
