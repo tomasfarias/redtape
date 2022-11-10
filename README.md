@@ -19,7 +19,7 @@ poetry install
 Install with `pip`:
 
 ```sh
-python -m pip install redtape
+python -m pip install redtape-py
 ```
 
 ## Usage
