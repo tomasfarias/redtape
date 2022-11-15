@@ -112,9 +112,9 @@ class ManagementOperation:
         if self.privilege is None:
             return f"<{self.operation}: {self.subject}>"
         else:
-            if self.operationt is Operation.GRANT:
+            if self.operation is Operation.GRANT:
                 prep = "to"
-            elif self.operationt is Operation.REVOKE:
+            elif self.operation is Operation.REVOKE:
                 prep = "from"
 
             return f"<{self.operation}: {self.privilege} {prep} {self.subject}>"
@@ -158,9 +158,9 @@ class UserManagementOperation(ManagementOperation):
         if self.group is None:
             return super().__str__()
         else:
-            if self.operationt is Operation.ADD_TO_GROUP:
+            if self.operation is Operation.ADD_TO_GROUP:
                 prep = "to"
-            elif self.operationt is Operation.DROP_FROM_GROUP:
+            elif self.operation is Operation.DROP_FROM_GROUP:
                 prep = "from"
 
             return f"<{self.operation}: {self.privilege} {prep} {self.group}>"
@@ -523,10 +523,15 @@ class DatabaseAdministratorTrainer:
             if user.member_of is None or len(user.member_of) == 0:
                 continue
 
-            if compare_user := users_map.get(user.name, None) is not None:
-                to_operate = user.member_of - compare_user.member_of
-            else:
-                to_operate = user.member_of
+            to_operate = user.member_of
+
+            try:
+                to_operate = to_operate - users_map[user.name].member_of
+            except (TypeError, KeyError):
+                # No information about current group membership exists.
+                # KeyError raised if user doesn't currently exists.
+                # TypeError raised if user is not a member of any groups.
+                pass
 
             for group_name in to_operate:
                 group = group_map[group_name]
