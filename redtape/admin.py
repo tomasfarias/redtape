@@ -537,7 +537,7 @@ class DatabaseAdministratorTrainer:
 
                 self._management_ops.append(
                     UserManagementOperation(
-                        subject=user, operation=Operation.DROP_FROM_GROUP, group=group
+                        subject=user, operation=operation, group=group
                     )
                 )
 
