@@ -235,14 +235,13 @@ class UserManagementOperation(ManagementOperation):
         return f"ALTER GROUP {self.group.name} {op} USER {self.subject.name};"
 
     @build_query.register(Operation.ALTER_OWNER)
-    def build_group_queries(self) -> str:
+    def build_ownership_query(self) -> str:
         if self.database_object is None:
             raise TypeError(
                 f"{self.operation} requires a DatabaseObject but "
                 f"{type(self.database_object)} was provided."
             )
 
-        op = self.operation.canonical
         return f"ALTER {self.database_object._type} {self.database_object.name} OWNER TO {self.subject.name};"
 
 
