@@ -5,6 +5,7 @@ file or a database connector. The core of Redtape is essentially deserializing
 both the specification file and the current specification as given by a
 database connector into the same models. This way, they may be compared to
 prepare the queries that need to be run."""
+
 from __future__ import annotations
 
 import itertools
