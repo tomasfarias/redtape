@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Wait for Tests to succeed
-        uses: fountainhead/action-wait-for-check@v1.0.0
+        uses: fountainhead/action-wait-for-check@v1
         id: wait-for-test
         with:
           token: ${{ secrets.PA_TOKEN }}
-          checkName: test
+          checkName: Test
           ref: ${{ github.sha }}
       - uses: actions/checkout@v4
       - name: Set up Python 3.12
