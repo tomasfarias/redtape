@@ -193,13 +193,19 @@ users:
 # To do
 
 `redtape` should be considered in Alpha status: things may break, and test coverage is low. The following tasks are planned for a 1.0.0 release:
-* Increase and track test coverage.
-* Documentation.
-* Support for wildcard (`*`) in specification file.
-* Support for ownership.
-* Support for `ASSUMEROLE`.
-* Support for `EXTERNAL` objects.
-* Complete support for `mypy` static type-checking.
+
+- [ ] Meaningfully increase test coverage:
+  - [ ] Integration tests against PostgreSQL 8.1 (should closely mimic Redshift).
+  - [ ] Unit testing of queries generated.
+- [ ] Documentation.
+- [ ] Missing features:
+  - [ ] Support for wildcard (`*`) in specification file.
+  - [ ] Support for ownership (`ALTER TABLE ... OWNER TO ...`).
+  - [ ] Support for ownership.
+  - [ ] Support for roles (`CREATE ROLE`, `GRANT ROLE`, `ASSUMEROLE`, etc...).
+  - [ ] Support for role management (`ASSUMEROLE`, `CREATE ROLE`, `DROP ROLE`, etc...).
+  - [ ] Support for permissions related to `EXTERNAL` objects.
+- [ ] Complete support for `mypy` static type-checking.
 
 # License
 
