@@ -7,9 +7,7 @@ the builder."""
 
 from __future__ import annotations
 
-from abc import abstractmethod
-from enum import Enum, auto
-from functools import update_wrapper
+from enum import Enum
 from typing import Any, Callable, Iterator, Optional, Union
 
 import psycopg2
@@ -719,7 +717,6 @@ class DatabaseAdministrator:
         success = True
 
         for idx, tup in enumerate(self.queries()):
-
             query, action = tup
             before_result = before_callback(query, action)
 
@@ -732,7 +729,6 @@ class DatabaseAdministrator:
 
                 on_error_callback(query, action, e, before_result)
 
-                print(on_error == OnError.ABORT)
                 if on_error == OnError.ABORT:
                     raise ManagementOperationError(action) from e
                 else:

@@ -197,6 +197,9 @@ users:
 - [ ] Meaningfully increase test coverage:
   - [ ] Integration tests against PostgreSQL 8.1 (should closely mimic Redshift).
   - [ ] Unit testing of queries generated.
+- [ ] CI/CD:
+  - [ ] Get auto-deployment working again.
+  - [ ] Remove codecov.
 - [ ] Documentation.
 - [ ] Missing features:
   - [ ] Support for wildcard (`*`) in specification file.
